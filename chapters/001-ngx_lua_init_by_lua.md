@@ -1,8 +1,3 @@
----
-title: lua-nginx-module 指令之 init_by_lua
-tag: nginx lua lua-nginx-module
----
-
 > 以下代码均出自 lua-nginx-module v0.10.7 版本
 
 > 本文主要介绍 `init_by_lua ` 这个指令，通过这个指令的透析，我们还可以了解 Lua code 到底是怎么运行起来的，本文着眼于整体步骤因此没有入到很深的代码细节
