@@ -3,14 +3,9 @@ title: lua-nginx-module 指令之 init_by_lua
 tag: nginx lua lua-nginx-module
 ---
 
-### 前言
-
-这篇文章主要是笔者阅读春哥的巨作 `lua-nginx-module` 所做的一些分析、总结和感想。
-如果有解释不当或者不正确的地方，请指正。
-
 > 以下代码均出自 lua-nginx-module v0.10.7 版本
 
-> 本文主要介绍 `init_by_lua ` 这个指令，通过这个指令的透析，我们还可以了解 Lua code 到底是怎么运行起来的，着眼于整体步骤而没有陷入到很深的代码细节
+> 本文主要介绍 `init_by_lua ` 这个指令，通过这个指令的透析，我们还可以了解 Lua code 到底是怎么运行起来的，本文着眼于整体步骤因此没有入到很深的代码细节
 
 
 ### init_by_lua 指令
@@ -87,7 +82,7 @@ ngx_http_lua_init_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 
 这个函数让 `init_hander` 指向了配置项的 post 指针指向的函数；然后把对应 Lua 代码串赋值给 `init_src` 这个字符串（如果 post 指针指向`ngx_http_lua_init_by_file` 那么则是把对应 Lua 代码的绝对路径赋值给 `init_src`）
 
-实际上这条指令对应的 Lua 代码将会在配置项解析完之后被执行（见 ngx_http_lua_module.c:594，lua-nginx-module 模块上下文中 postconfiguartion），被执行的函数是 `ngx_http_lua_init`
+实际上这条指令对应的 Lua 代码将会在配置项解析完之后被执行（见 ngx_http_lua_module.c:594，lua-nginx-module 模块上下文中 `postconfiguartion`），被执行的函数是 `ngx_http_lua_init`
 
 ```c
 /* in postconfiguration */
@@ -235,7 +230,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
 嗯，这个函数比较长，让我们看看它到底做了什么事：
 
 - 判断 `lua-nginx-module` 是否介入 rewrite、access 和 log 阶段，如果介入，则放到相应阶段的 handlers 动态数组内
-- 判断 `lua-nginx-module` 是否介入到 header_filter 和 body_filter 阶段，如果介入，则需要把 filter 的链设置下
+- 判断 `lua-nginx-module` 是否介入到 header_filter 和 body_filter 阶段，如果介入，则需要把 head_filter 或者 body_filter 的“链”设置下
 - 判断是否需要初始化 Lua VM，如果需要，则调用 `ngx_http_lua_init_vm` 得到一个 lua_State，并调用因 `init_by_lua` 这个指令而设置的 init_handler
 
 那么 `init_by_lua` 的使命就结束了，但是，究竟这里的 Lua 代码是怎么被执行的呢？
@@ -290,7 +285,7 @@ ngx_http_lua_do_call(ngx_log_t *log, lua_State *L)
 }
 ```
 
-这个函数把 `ngx_http_lua_traceback` 压入到 Lua 的虚拟栈，作为异常处理函数，然后调用了 lua_pcall 来执行刚才加载的 chunk，得到运行之后的状态，如果出错则会得到一个描述错误的字符串（在栈底），stauts 为 0 表示运行成功，否则返回对应的错误码
+这个函数把 `ngx_http_lua_traceback` 压入到 Lua 的虚拟栈，作为异常处理函数，然后调用了 `lua_pcall` 来执行刚才加载的 chunk，得到运行之后的状态，如果出错则会得到一个描述错误的字符串（在栈底），`status` 为 0 表示运行成功，否则返回对应的错误码
 
 最终这个状态码被传给 `ngx_http_lua_report` 这个函数
 
@@ -318,7 +313,7 @@ ngx_http_lua_report(ngx_log_t *log, lua_State *L, int status,
 }
 ```
 
-这个函数只是在 status 非 0 的时候进行了一次日志记录，然后强制进行一次垃圾回收。而通常我们看到的这样的错误日志则如下：
+这个函数只是在 `status` 非 0 的时候进行了一次日志记录，然后强制进行一次垃圾回收。而通常我们看到的这样的错误日志则如下：
 
 ```
 stack traceback:
@@ -328,7 +323,7 @@ stack traceback:
 ...vagrant/WorkStation/marco/nginx/app/src/marco_access.lua:111: in function <...vagrant/WorkStation/marco/nginx/app/src/marco_access.lua:1>, client: 127.0.0.1, server: *       .b0.upaiyun.com, request: "GET /dyn-parents HTTP/1.1", host: "hbimg.b0.upaiyun.com"
 ```
 
-那么在这个阶段假如出现 Lua 代码出错，Nginx 是无法正常启动起来的，比如我随便在 init_by_lua 的 Lua 代码里写点错误的东西，Nginx 启动就把对应的日志打到了屏幕上
+那么在这个阶段假如出现 Lua 代码出错，Nginx 是无法正常启动起来的，比如我随便在 `init_by_lua` 的 Lua 代码里写点错误的东西，Nginx 启动就把对应的日志打到了屏幕上
 
 ```bash
 → sudo make start                                                                                                                                                          
@@ -368,7 +363,7 @@ ngx_http_lua_traceback(lua_State *L)
 }
 ```
 
-这个函数调用 Lua 的 debug.traceback，然后把之前得到的错误信息压入栈中，将出错登记设置为 2（也就是调用 ngx_http_lua_traceback 的函数，1 是调用 debug.traceback 的函数）
+这个函数调用 Lua 的 `debug.traceback`，然后把之前得到的错误信息压入栈中，将出错登记设置为 2（也就是调用 `ngx_http_lua_traceback` 的函数，1 是调用 `debug.traceback` 的函数）
 
 
 ### 总结
