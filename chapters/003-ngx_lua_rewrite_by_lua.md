@@ -1,7 +1,7 @@
 > 以下代码均出自 lua-nginx-module v0.10.7 版本
 
 > 这篇文章主要要介绍 `rewrite_by_lua` 这个指令 <br>
-> rewrite 是 Nginx HTTP 框架划分的 11 个阶段的其中之一，通常在这个阶段我们可以实现 uri 的修改（进行内部重定向）或者 301、302 的 HTTP 重定向
+> rewrite 是 Nginx HTTP 框架划分的 11 个阶段的其中之一，通常在这个阶段我们可以实现 uri 的修改（进行内部重定向）或者 301、302 的 HTTP 重定向；另外，下面的讲解以 `rewrite_by_lua` 这个指令来展开，`rewrite_by_lua_block` 和 `rewrite_by_lua _file` 类似，不再赘述
 > 
 
 
@@ -130,13 +130,171 @@ ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 <img src="../images/003-ngx_http_lua_rewrite_by_lua-002.png" alt="rewrite_src_key">
 
-后面就是用这个 key 来检索缓存 Lua code，当然前提是 `lua_code_cache` 是 `on`
+后面就是用这个 key 来检索缓存 Lua code，当然前提是 `lua_code_cache` 这条指令打开，生产环境中一般都需要对 Lua code 进行缓存以提高效率；开发环境中为了调试方便则可以关闭缓存。
 
 恩，指令解析到这里就结束了，那么，`rewrite_by_lua` 究竟是如何让 Lua code 介入到 HTTP 请求里的呢？下面就来一探究竟
 
 ### rewrite_by_lua_handler
 
 这是真正被插入到 rewrite 阶段的回调方法（见 [ngx_lua_init_by_lua](001-ngx_lua_init_by_lua.md) 关于`ngx_http_lua_init` 的介绍）
+
+```c
+ngx_int_t
+ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
+{
+    ngx_http_lua_loc_conf_t     *llcf;
+    ngx_http_lua_ctx_t          *ctx;
+    ngx_int_t                    rc;
+    ngx_http_lua_main_conf_t    *lmcf;
+
+    /* XXX we need to take into account ngx_rewrite's location dump */
+    if (r->uri_changed) {
+        /* to next http module */
+        return NGX_DECLINED;
+    }
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "lua rewrite handler, uri:\"%V\" c:%ud", &r->uri,
+                   r->main->count);
+
+    lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
+
+    /*
+     * this if block will put the rewrite_by_lua to
+     * the last position of nginx rewirte phase
+     */
+    if (!lmcf->postponed_to_rewrite_phase_end) {
+        ngx_http_core_main_conf_t       *cmcf;
+        ngx_http_phase_handler_t        tmp;
+        ngx_http_phase_handler_t        *ph;
+        ngx_http_phase_handler_t        *cur_ph;
+        ngx_http_phase_handler_t        *last_ph;
+
+        lmcf->postponed_to_rewrite_phase_end = 1;
+
+        cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
+
+        ph = cmcf->phase_engine.handlers;
+        cur_ph = &ph[r->phase_handler];
+        /* the last module in rewrite phase */
+        last_ph = &ph[cur_ph->next - 1];
+
+#if 0
+        if (cur_ph == last_ph) {
+            dd("XXX our handler is already the last rewrite phase handler");
+        }
+#endif
+
+        if (cur_ph < last_ph) {
+            dd("swaping the contents of cur_ph and last_ph...");
+
+            tmp      = *cur_ph;
+
+            memmove(cur_ph, cur_ph + 1,
+                    (last_ph - cur_ph) * sizeof (ngx_http_phase_handler_t));
+
+            *last_ph = tmp;
+
+            r->phase_handler--; /* redo the current ph */
+
+            return NGX_DECLINED;
+        }
+    }
+
+	 llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
+
+    if (llcf->rewrite_handler == NULL) {
+        dd("no rewrite handler found");
+        return NGX_DECLINED;
+    }
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
+
+    dd("ctx = %p", ctx);
+
+    if (ctx == NULL) {
+        ctx = ngx_http_lua_create_ctx(r);
+        if (ctx == NULL) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+    }
+
+    dd("entered? %d", (int) ctx->entered_rewrite_phase);
+
+    /* rewrite_by_lua can't be finished in one epoll dispatch */
+    if (ctx->entered_rewrite_phase) {
+        dd("rewriteby: calling wev handler");
+        rc = ctx->resume_handler(r);
+        dd("rewriteby: wev handler returns %d", (int) rc);
+
+        if (rc == NGX_OK) {
+            rc = NGX_DECLINED;
+        }
+
+        if (rc == NGX_DECLINED) {
+            if (r->header_sent) {
+                dd("header already sent");
+
+                /* response header was already generated in access_by_lua*,
+                 * so it is no longer safe to proceed to later phases
+                 * which may generate responses again */
+
+                if (!ctx->eof) {
+                    dd("eof not yet sent");
+
+                    rc = ngx_http_lua_send_chain_link(r, ctx, NULL
+                                                     /* indicate last_buf */);
+                    if (rc == NGX_ERROR || rc > NGX_OK) {
+                        return rc;
+                    }
+
+                    return NGX_OK;
+                }
+            }
+
+            return rc;
+        }
+
+        if (ctx->waiting_more_body) {
+            /* waiting for more request body */
+            return NGX_DONE;
+        }
+
+    /* lua_need_request_body directive */
+    if (llcf->force_read_body && !ctx->read_body_done) {
+        r->request_body_in_single_buf = 1;
+        r->request_body_in_persistent_file = 1;
+        r->request_body_in_clean_file = 1;
+
+        rc = ngx_http_read_client_request_body(r,
+                                       ngx_http_lua_generic_phase_post_read);
+
+        if (rc == NGX_ERROR || rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+#if (nginx_version < 1002006) ||                                             \
+        (nginx_version >= 1003000 && nginx_version < 1003009)
+            r->main->count--;
+#endif
+
+            return rc;
+        }
+
+        if (rc == NGX_AGAIN) {
+            ctx->waiting_more_body = 1;
+            return NGX_DONE;
+        }
+    }
+
+    dd("calling rewrite handler");
+    return llcf->rewrite_handler(r);
+}
+```
+
+让我们来解剖下这个函数 <br>
+首先回顾下 [ngx_lua_init_by_lua](001-ngx_lua_init_by_lua.md) 这一节，里面有介绍 `ngx_http_lua_init` 这个函数，该函数的一小段代码则是把 `lmcf->postponed_to_rewrite_phase_end ` 置 0，这个变量用来标记 `rewrite_by_lua` 的回调方法是否被放置 rewrite 阶段最后，因此这个函数需要检测下这个变量，当它发现 Lua 的回调方法没有放到最后一位时（第一个被 Lua 介入到的请求），需要手动修改回调方法的位置，我们知道 HTTP 框架通过 `phase_engine.handlers` 这个动态数组来连续存放每个 HTTP 模块插入到所有阶段的回调，因此修改顺序实际只需要修改这个数组就行了，值得注意的是，我们要对 `r->phase_handler` 减一，因为交换顺序完毕后，该函数返回 `NGX_DECLINED`，代表希望 HTTP 框架按顺序执行下一个模块的回调，而在 `ngx_http_core_rewrite_phase` 这个 checker 中则会对 `r->phase_handler` 加一，为了某个模块的回调不被漏掉，这里才对这个值减去了 1
+
+继续看这个函数，我们会发现原来 `lua-nginx-module` 的模块上下文也是在某请求里被创建的，当然只会创建一次；另外，对于重入到 `rewrite_by_lua` 的情况，这个函数也做了处理；最后，当它发现需要需要读取请求体的时候，它还会调用 `ngx_http_read_client_request_body ` 来读请求体，如果一次读不完，把 `ctx->waiting_more_body` 设置为 1，然后返回 `NGX_DONE`，这个特殊的返回值会让 `ngx_http_core_rewrite_phase ` 这个 checker 会让 HTTP 框架的控制权返回到事件模块，调度其他的请求，而这个请求则会在未来某个时刻被重新调度到，届时 `rewrite_by_lua ` 的回调方法会被重入，当然，该读的读完，一切就绪之后，就轮到我们的 Lua 代码被执行了，也就是 `ngx_http_lua_rewrite_handler_inline ` 会被调用。
+
+### ngx_http_lua_rewrite_handler_inline
 
 ```c
 ngx_int_t
