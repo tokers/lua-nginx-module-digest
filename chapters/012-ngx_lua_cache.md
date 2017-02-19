@@ -78,7 +78,7 @@ ngx_http_lua_cache_load_code(ngx_log_t *log, lua_State *L,
 }
 ```
 
-首先需要明确的一点是，`lua-nginx-module` 它把所有的 Lua chunk 存放在 Lua 提供的注册表中（Registry），通过某个键，来获取到专门存放 chunk 的 code table，而这个键就是 `ngx_http_lua_code_cache_key` 这个 char 类型的变量的地址（一个全局变量，存放在全局/静态存储区），显然它是独一无二的。然后再根据参数 key（见 [rewrite_by_lua](003-ngx_lua_rewrite_by_lua.md) 里的分析）来作为 code table 的键，把对应的 Lua chunk 拿出来并存在栈顶。然后需要判断这个 chunk 是否合法（是否是一个函数），如果合法，调用 lua_pcall 运行一次，这一步可能会令人迷惑，既然我们已经拿到了 Lua chunk，为什么要先运行一次呢？这里暂时先不解释，继续看下去就会明白了。
+首先需要明确的一点是，`lua-nginx-module` 它把所有的 Lua chunk 存放在 Lua 提供的注册表中（Registry），通过某个键，来获取到专门存放 chunk 的 code table，而这个键就是 `ngx_http_lua_code_cache_key` 这个 char 类型的变量的地址（一个全局变量，存放在全局/静态存储区），显然它是独一无二的。然后再根据参数 key（见 [rewrite_by_lua](003-ngx_lua_rewrite_by_lua.md) 里的分析）来作为 code table 的键，把对应的 Lua chunk 拿出来并存在栈顶。然后需要判断这个 chunk 是否是一个函数，是的话调用 lua_pcall 运行一次，这一步可能会令人迷惑，既然我们已经拿到了 Lua chunk，为什么要先运行一次呢？这里暂时先不解释，继续看下去就会明白了。
 
 恩，假如顺利从缓存里拿到了 Lua chunk，就不需要再继续运行那个缓存状态机了，否则还得老老实实地从 Lua 代码加载
 
