@@ -290,7 +290,8 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
 ```
 
 让我们来解剖下这个函数 <br>
-首先回顾下 [ngx_lua_init_by_lua](001-ngx_lua_init_by_lua.md) 这一节，里面有介绍 `ngx_http_lua_init` 这个函数，该函数的一小段代码则是把 `lmcf->postponed_to_rewrite_phase_end ` 置 0，这个变量用来标记 `rewrite_by_lua` 的回调方法是否被放置 rewrite 阶段最后，因此这个函数需要检测下这个变量，当它发现 Lua 的回调方法没有放到最后一位时（第一个被 Lua 介入到的请求），需要手动修改回调方法的位置，我们知道 HTTP 框架通过 `phase_engine.handlers` 这个动态数组来连续存放每个 HTTP 模块插入到所有阶段的回调，因此修改顺序实际只需要修改这个数组就行了，值得注意的是，我们要对 `r->phase_handler` 减一，因为交换顺序完毕后，该函数返回 `NGX_DECLINED`，代表希望 HTTP 框架按顺序执行下一个模块的回调，而在 `ngx_http_core_rewrite_phase` 这个 checker 中则会对 `r->phase_handler` 加一，为了某个模块的回调不被漏掉，这里才对这个值减去了 1
+首先可以看到，如果 uri 被改变了，该函数直接返回 <br>
+再来回顾下 [ngx_lua_init_by_lua](001-ngx_lua_init_by_lua.md) 这一节，里面有介绍 `ngx_http_lua_init` 这个函数，该函数的一小段代码则是把 `lmcf->postponed_to_rewrite_phase_end ` 置 0，这个变量用来标记 `rewrite_by_lua` 的回调方法是否被放置 rewrite 阶段最后，因此这个函数需要检测下这个变量，当它发现 Lua 的回调方法没有放到最后一位时（第一个被 Lua 介入到的请求），需要手动修改回调方法的位置，我们知道 HTTP 框架通过 `phase_engine.handlers` 这个动态数组来连续存放每个 HTTP 模块插入到所有阶段的回调，因此修改顺序实际只需要修改这个数组就行了，值得注意的是，我们要对 `r->phase_handler` 减一，因为交换顺序完毕后，该函数返回 `NGX_DECLINED`，代表希望 HTTP 框架按顺序执行下一个模块的回调，而在 `ngx_http_core_rewrite_phase` 这个 checker 中则会对 `r->phase_handler` 加一，为了某个模块的回调不被漏掉，这里才对这个值减去了 1
 
 继续看这个函数，我们会发现原来 `lua-nginx-module` 的模块上下文也是在某请求里被创建的，当然只会创建一次；另外，对于重入到 `rewrite_by_lua` 的情况，这个函数也做了处理；最后，当它发现需要需要读取请求体的时候，它还会调用 `ngx_http_read_client_request_body ` 来读请求体，如果一次读不完，把 `ctx->waiting_more_body` 设置为 1，然后返回 `NGX_DONE`，这个特殊的返回值会让 `ngx_http_core_rewrite_phase ` 这个 checker 会让 HTTP 框架的控制权返回到事件模块，调度其他的请求，而这个请求则会在未来某个时刻被重新调度到，届时 `rewrite_by_lua ` 的回调方法会被重入，当然，该读的读完，一切就绪之后，就轮到我们的 Lua 代码被执行了，也就是 `ngx_http_lua_rewrite_handler_inline ` 会被调用。
 
@@ -437,7 +438,8 @@ error:
 
 这里对 `ngx_http_lua_cache_load_code `，`ngx_http_lua_clfactory_loadbuffer ` 和 `ngx_http_lua_cache_store_code ` 这三个具体的函数不展开分析，有兴趣可以自行阅读
 
+最后 Lua chunk 已经被拿到而且已经在栈顶，之后调用 `ngx_http_lua_rewrite_by_chunk` 运行起来就行了
 
-### ngx_http_lua_rewrite_by_chunk
+### 总结
 
-恩，现在 Lua chunk 拿到了而且已经在栈顶了，下面的任务就是把它跑起来了
+本节通过 `rewrite_by_lua` 这个指令介绍了 `lua-nginx-module` 是怎么样介入请求，如何加载、缓存 Lua 代码
