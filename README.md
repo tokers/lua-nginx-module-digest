@@ -16,3 +16,6 @@
   - ngx.sleep
   - ngx.var.VARIABLES
   - others
+  
+- others
+  - [ngx_http_lua_cache](chapters/012-ngx_lua_cache.md)
