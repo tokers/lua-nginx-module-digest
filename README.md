@@ -10,13 +10,13 @@
   - content_by_lua
   - filter_by_lua
   - log_by_lua
-
+  
 - api
-  - [ngx.log](chapters/015-ngx_lua_log.md)
-  - ngx.ctx
-  - ngx.sleep
-  - ngx.var.VARIABLES
-  - others
+  * [ngx.log](chapters/015-ngx_lua_log.md)
+  * ngx.ctx
+  * ngx.sleep
+  * ngx.var.VARIABLES
+  * others
   
 - others
   - [ngx_http_lua_cache](chapters/012-ngx_lua_cache.md)
