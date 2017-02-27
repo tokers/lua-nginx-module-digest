@@ -1,13 +1,13 @@
 > 以下代码均出自 lua-nginx-module v0.10.7 版本
-
-> 这篇文章主要要介绍 `rewrite_by_lua` 这个指令 <br>
-> rewrite 是 Nginx HTTP 框架划分的 11 个阶段的其中之一，通常在这个阶段我们可以实现 uri 的修改（进行内部重定向）或者 301、302 的 HTTP 重定向；另外，下面的讲解以 `rewrite_by_lua` 这个指令来展开，`rewrite_by_lua_block` 和 `rewrite_by_lua _file` 类似，不再赘述
+>
+> 这篇文章主要要介绍 `rewrite_by_lua` 这个指令以及由这个指令延伸开来的相关函数。 <br>
+> rewrite 是 Nginx HTTP 框架划分的 11 个阶段的其中之一，通常在这个阶段我们可以实现 uri 的修改；下面的讲解以 `rewrite_by_lua` 这个指令来展开，`rewrite_by_lua_block` 和 `rewrite_by_lua _file` 类似，不展开讨论。
 > 
 
 
 ### rewrite_by_lua
 
-`lua-nginx-module` 通过这个指令来介入到一个请求的 rewrite 阶段。先来看下其配置项结构
+`lua-nginx-module` 通过这个指令来介入到一个请求的 rewrite 阶段。先来看下其配置项结构。
 
 ```c
      { ngx_string("rewrite_by_lua"),
@@ -18,13 +18,13 @@
      (void *) ngx_http_lua_rewrite_handler_inline },
 ```
 
-从这里可以了解到
+从这里可以了解到：
 
-- 这个指令可以出现在 main 配置块下、server 配置块下、location 配置块下和 location 下的 if 块
-- 必须携带一个参数
-- 解析函数是 `ngx_http_lua_rewrite_by_lua`
+- 这个指令可以出现在 main 配置块下、server 配置块下、location 配置块下和 location 下的 if 块。
+- 必须携带一个参数。
+- 解析函数是 `ngx_http_lua_rewrite_by_lua`。
 
-同样地，我们来看下 `ngx_http_lua_rewrite_by_lua ` 这个函数
+同样地，我们来看下 `ngx_http_lua_rewrite_by_lua ` 这个函数：
 
 ```c
 /* parse `rewrite_by_lua` */
@@ -126,17 +126,17 @@ ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 <img src="../images/003-ngx_http_lua_rewrite_by_lua-001.png" alt="chunkname">
 
-接下来根据配置项配置的 post 指针指向的函数不同，记录下 Lua code 或者 Lua code path；最后为 Lua code cache 这个功能计算了一个 cache key，通过 gdb 我们来看下计算出来的 key 是什么样的（这边实例走的是 `rewrite_by_lua_file` 指令）
+接下来根据配置项配置的 post 指针指向的函数不同，记录下 Lua code 或者 Lua code path；最后为 Lua code cache 这个功能计算了一个 cache key，通过 gdb 我们来看下计算出来的 key 是什么样的（这边实例走的是 `rewrite_by_lua_file` 指令）。
 
 <img src="../images/003-ngx_http_lua_rewrite_by_lua-002.png" alt="rewrite_src_key">
 
 后面就是用这个 key 来检索缓存 Lua code，当然前提是 `lua_code_cache` 这条指令打开，生产环境中一般都需要对 Lua code 进行缓存以提高效率；开发环境中为了调试方便则可以关闭缓存。
 
-恩，指令解析到这里就结束了，那么，`rewrite_by_lua` 究竟是如何让 Lua code 介入到 HTTP 请求里的呢？下面就来一探究竟
+恩，指令解析到这里就结束了，那么，`rewrite_by_lua` 究竟是如何让 Lua code 介入到 HTTP 请求里的呢？下面就来一探究竟。
 
 ### rewrite_by_lua_handler
 
-这是真正被插入到 rewrite 阶段的回调方法（见 [ngx_lua_init_by_lua](001-ngx_lua_init_by_lua.md) 关于`ngx_http_lua_init` 的介绍）
+这是真正被插入到 rewrite 阶段的回调方法（见 [ngx_lua_init_by_lua](001-ngx_lua_init_by_lua.md) 关于`ngx_http_lua_init` 的介绍）。
 
 ```c
 ngx_int_t
@@ -289,9 +289,9 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
 }
 ```
 
-让我们来解剖下这个函数 <br>
-首先可以看到，如果 uri 被改变了，该函数直接返回 <br>
-再来回顾下 [ngx_lua_init_by_lua](001-ngx_lua_init_by_lua.md) 这一节，里面有介绍 `ngx_http_lua_init` 这个函数，该函数的一小段代码则是把 `lmcf->postponed_to_rewrite_phase_end ` 置 0，这个变量用来标记 `rewrite_by_lua` 的回调方法是否被放置 rewrite 阶段最后，因此这个函数需要检测下这个变量，当它发现 Lua 的回调方法没有放到最后一位时（第一个被 Lua 介入到的请求），需要手动修改回调方法的位置，我们知道 HTTP 框架通过 `phase_engine.handlers` 这个动态数组来连续存放每个 HTTP 模块插入到所有阶段的回调，因此修改顺序实际只需要修改这个数组就行了，值得注意的是，我们要对 `r->phase_handler` 减一，因为交换顺序完毕后，该函数返回 `NGX_DECLINED`，代表希望 HTTP 框架按顺序执行下一个模块的回调，而在 `ngx_http_core_rewrite_phase` 这个 checker 中则会对 `r->phase_handler` 加一，为了某个模块的回调不被漏掉，这里才对这个值减去了 1
+让我们来解剖下这个函数。<br>
+首先可以看到，如果 uri 被改变了，该函数直接返回。 <br>
+再来回顾下 [ngx_lua_init_by_lua](001-ngx_lua_init_by_lua.md) 这一节，里面有介绍 `ngx_http_lua_init` 这个函数，该函数的一小段代码则是把 `lmcf->postponed_to_rewrite_phase_end ` 置 0，这个变量用来标记 `rewrite_by_lua` 的回调方法是否被放置 rewrite 阶段最后，因此这个函数需要检测下这个变量，当它发现 Lua 的回调方法没有放到最后一位时（第一个被 Lua 介入到的请求），需要手动修改回调方法的位置，我们知道 HTTP 框架通过 `phase_engine.handlers` 这个动态数组来连续存放每个 HTTP 模块插入到所有阶段的回调，因此修改顺序实际只需要修改这个数组就行了，值得注意的是，我们要对 `r->phase_handler` 减一，因为交换顺序完毕后，该函数返回 `NGX_DECLINED`，代表希望 HTTP 框架按顺序执行下一个模块的回调，而在 `ngx_http_core_rewrite_phase` 这个 checker 中则会对 `r->phase_handler` 加一，为了某个模块的回调不被漏掉，这里才对这个值减去了 1。
 
 继续看这个函数，我们会发现原来 `lua-nginx-module` 的模块上下文也是在某请求里被创建的，当然只会创建一次；另外，对于重入到 `rewrite_by_lua` 的情况，这个函数也做了处理；最后，当它发现需要需要读取请求体的时候，它还会调用 `ngx_http_read_client_request_body ` 来读请求体，如果一次读不完，把 `ctx->waiting_more_body` 设置为 1，然后返回 `NGX_DONE`，这个特殊的返回值会让 `ngx_http_core_rewrite_phase ` 这个 checker 会让 HTTP 框架的控制权返回到事件模块，调度其他的请求，而这个请求则会在未来某个时刻被重新调度到，届时 `rewrite_by_lua ` 的回调方法会被重入，当然，该读的读完，一切就绪之后，就轮到我们的 Lua 代码被执行了，也就是 `ngx_http_lua_rewrite_handler_inline ` 会被调用。
 
@@ -326,11 +326,11 @@ ngx_http_lua_rewrite_handler_inline(ngx_http_request_t *r)
 ```
 
 这个函数通过函数 `ngx_http_lua_get_lua_vm` 获取到 Lua VM，然后进行 rewrite 阶段的 Lua code 的“载入”（从缓存里取或者调用 `lua_loadbuffer` 载入）
-最后调用 `ngx_http_lua_rewrite_by_chunk ` 运行 Lua chunk。下面就来分析下这些过程
+最后调用 `ngx_http_lua_rewrite_by_chunk ` 运行 Lua chunk。下面就来分析下这些过程。
 
 ### ngx_http_lua_get_lua_vm
 
-首先，Lua VM 是怎么取到的呢？请看 `ngx_http_lua_get_lua_vm`
+首先，Lua VM 是怎么取到的呢？请看 `ngx_http_lua_get_lua_vm`：
 
 ```c
 static ngx_inline lua_State *
@@ -352,12 +352,12 @@ ngx_http_lua_get_lua_vm(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 }
 ```
 
-代码非常简单，首先是尝试从 `lua-nginx-module` 模块上下文里取 Lua VM，但是有可能此时 ctx 还没有被创建出来，所以在 ctx 没有被创建出来的情况下，就从 `lua-nginx-module` 的 main 配置结构体里取出 Lua VM
+代码非常简单，首先是尝试从 `lua-nginx-module` 模块上下文里取 Lua VM，但是有可能此时 ctx 还没有被创建出来，所以在 ctx 没有被创建出来的情况下，就从 `lua-nginx-module` 的 main 配置结构体里取出 Lua VM。
 
 ### ngx_http_lua_cache_loadbuffer
 
 接下来我们看下 得到 Lua chunk 的过程，也就是 `ngx_http_lua_cache_loadbuffer`
-这个函数
+这个函数：
 
 ```c
 ngx_int_t
@@ -429,16 +429,195 @@ error:
 }
 ```
 
-还记得之前所说的 `chunkname` 和 `rewrite_src_key`？没错，那两个字符串的用武之地就是在这里！我们来分析下这个函数，这里有个缓存状态机，步骤如下
+还记得之前所说的 `chunkname` 和 `rewrite_src_key`？没错，那两个字符串的用武之地就是在这里！我们来分析下这个函数，这里有个缓存状态机，步骤如下：
 
-1. 调用 `ngx_http_lua_cache_load_code`，判断当前的 Lua chunk 有没有缓存，得到返回码，如果返回码为 NGX_OK，跳到第二步；如果返回码是 `NGX_ERROR`，跳到第三步；否则跳到第四步
-2. 从缓存中拿到 Lua chunk 且被压入到栈，返回 NGX_OK
-3. 出错，返回 NGX_ERROR
-4. 缓存 Miss，从原生的 Lua 代码加载，然后压栈，如果出错，记录错误日志然后返回 `NGX_ERROR`；否则返回 `NGX_OK`
+1. 调用 `ngx_http_lua_cache_load_code`，判断当前的 Lua chunk 有没有缓存，得到返回码，如果返回码为 NGX_OK，跳到第二步；如果返回码是 `NGX_ERROR`，跳到第三步；否则跳到第四步。
+2. 从缓存中拿到 Lua chunk 且被压入到栈，返回 NGX_OK。
+3. 出错，返回 NGX_ERROR。
+4. 缓存 Miss，从原生的 Lua 代码加载，然后压栈，如果出错，记录错误日志然后返回。`NGX_ERROR`；否则返回 `NGX_OK`。
 
-这里对 `ngx_http_lua_cache_load_code `，`ngx_http_lua_clfactory_loadbuffer ` 和 `ngx_http_lua_cache_store_code ` 这三个具体的函数不展开分析，有兴趣可以自行阅读
+这里对 `ngx_http_lua_cache_load_code `，`ngx_http_lua_clfactory_loadbuffer ` 和 `ngx_http_lua_cache_store_code ` 这三个具体的函数不展开分析，详细讨论见 [ngx_http_lua_cache](012-ngx_lua_cache.md)。
 
-最后 Lua chunk 已经被拿到而且已经在栈顶，之后调用 `ngx_http_lua_rewrite_by_chunk` 运行起来就行了
+最后 Lua chunk 已经被拿到而且已经在栈顶，之后就是调用`ngx_http_lua_rewrite_by_chunk` 运行通过指令传入的 Lua 代码了。
+
+### ngx_http_lua_rewrite_by_chunk
+
+```c
+static ngx_int_t
+ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
+{
+    int                      co_ref;
+    lua_State               *co;
+    ngx_int_t                rc;
+    ngx_event_t             *rev;
+    ngx_connection_t        *c;
+    ngx_http_lua_ctx_t      *ctx;
+    ngx_http_cleanup_t      *cln;
+
+    ngx_http_lua_loc_conf_t     *llcf;
+
+    /*  {{{ new coroutine to handle request */
+    co = ngx_http_lua_new_thread(r, L, &co_ref);
+
+    if (co == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "lua: failed to create new coroutine to handle request");
+
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    /*  move code closure to new coroutine */
+    lua_xmove(L, co, 1);
+
+    /*  set closure's env table to new coroutine's globals table */
+    ngx_http_lua_get_globals_table(co);
+    lua_setfenv(co, -2);
+
+    /*  save nginx request in coroutine globals table */
+    ngx_http_lua_set_req(co, r);
+
+    /*  {{{ initialize request context */
+    ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
+
+    dd("ctx = %p", ctx);
+
+    if (ctx == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_http_lua_reset_ctx(r, L, ctx);
+
+    ctx->entered_rewrite_phase = 1;
+	
+	 ctx->cur_co_ctx = &ctx->entry_co_ctx;                                                                                                                                                                                      
+    ctx->cur_co_ctx->co = co;
+    ctx->cur_co_ctx->co_ref = co_ref;
+#ifdef NGX_LUA_USE_ASSERT
+    ctx->cur_co_ctx->co_top = 1;
+#endif
+
+    /*  }}} */
+
+    /*  {{{ register request cleanup hooks */
+    if (ctx->cleanup == NULL) {
+        cln = ngx_http_cleanup_add(r, 0);
+        if (cln == NULL) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
+        cln->handler = ngx_http_lua_request_cleanup_handler;
+        cln->data = ctx;
+        ctx->cleanup = &cln->handler;
+    }
+    /*  }}} */
+
+    ctx->context = NGX_HTTP_LUA_CONTEXT_REWRITE;
+
+    llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
+
+    if (llcf->check_client_abort) {
+        r->read_event_handler = ngx_http_lua_rd_check_broken_connection;
+
+#if (NGX_HTTP_V2)
+        if (!r->stream) {
+#endif
+
+        rev = r->connection->read;
+
+        if (!rev->active) {
+            if (ngx_add_event(rev, NGX_READ_EVENT, 0) != NGX_OK) {
+                return NGX_ERROR;
+            }
+        }
+
+#if (NGX_HTTP_V2)
+        }
+#endif
+
+    } else {
+        r->read_event_handler = ngx_http_block_reading;
+    }
+
+    rc = ngx_http_lua_run_thread(L, r, ctx, 0);
+
+    if (rc == NGX_ERROR || rc > NGX_OK) {
+        return rc;
+    }
+
+    c = r->connection;
+
+    if (rc == NGX_AGAIN) {
+        rc = ngx_http_lua_run_posted_threads(c, L, r, ctx);
+
+    } else if (rc == NGX_DONE) {
+        ngx_http_lua_finalize_request(r, NGX_DONE);
+        rc = ngx_http_lua_run_posted_threads(c, L, r, ctx);
+    }
+
+    if (rc == NGX_OK || rc == NGX_DECLINED) {
+        if (r->header_sent) {
+            dd("header already sent");
+
+            /* response header was already generated in access_by_lua*,
+             * so it is no longer safe to proceed to later phases
+             * which may generate responses again */
+
+            if (!ctx->eof) {
+                dd("eof not yet sent");
+
+                rc = ngx_http_lua_send_chain_link(r, ctx, NULL
+                                                  /* indicate last_buf */);
+                if (rc == NGX_ERROR || rc > NGX_OK) {
+                    return rc;
+                }
+            }
+
+            return NGX_HTTP_OK;
+        }
+
+        return NGX_DECLINED;
+    }
+
+    return rc;
+}
+```
+
+
+
+> 附录：ngx_http_lua_rewrite_by_chunk 函数 Lua 栈变化图
+
+```c
+/* the new coroutine
+
+|----------|
+|stack peak|
+|----------|
+|Lua chunk |
+|----------|
+	||
+	||	ngx_http_lua_get_globals_table
+	\/
+|----------------|
+|   stack peak   |
+|----------------|
+|   Lua chunk    |
+|----------------|
+|Lua global table|
+|----------------|
+	||
+	|| lua_setfenv, ngx_http_lua_set_req
+	\/
+|----------|
+|stack peak|
+|----------|
+|Lua chunk |
+|----------|	
+	||
+	||
+	\/
+	
+*/
+```
 
 ### 总结
 
