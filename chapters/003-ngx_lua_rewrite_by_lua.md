@@ -456,7 +456,7 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
 
     ngx_http_lua_loc_conf_t     *llcf;
 
-    /*  {{{ new coroutine to handle request */
+    /*  new coroutine to handle request */
     co = ngx_http_lua_new_thread(r, L, &co_ref);
 
     if (co == NULL) {
@@ -476,7 +476,7 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
     /*  save nginx request in coroutine globals table */
     ngx_http_lua_set_req(co, r);
 
-    /*  {{{ initialize request context */
+    /*  initialize request context */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
 
     dd("ctx = %p", ctx);
@@ -496,9 +496,8 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
     ctx->cur_co_ctx->co_top = 1;
 #endif
 
-    /*  }}} */
 
-    /*  {{{ register request cleanup hooks */
+    /*  register request cleanup hooks */
     if (ctx->cleanup == NULL) {
         cln = ngx_http_cleanup_add(r, 0);
         if (cln == NULL) {
@@ -509,7 +508,6 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
         cln->data = ctx;
         ctx->cleanup = &cln->handler;
     }
-    /*  }}} */
 
     ctx->context = NGX_HTTP_LUA_CONTEXT_REWRITE;
 
