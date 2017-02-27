@@ -49,7 +49,7 @@ ngx_http_lua_inject_log_api(lua_State *L)
 static void
 ngx_http_lua_inject_log_consts(lua_State *L)
 {
-    /* {{{ nginx log level constants */
+    /* nginx log level constants */
     lua_pushinteger(L, NGX_LOG_STDERR);
     lua_setfield(L, -2, "STDERR");
 
@@ -76,7 +76,6 @@ ngx_http_lua_inject_log_consts(lua_State *L)
 
     lua_pushinteger(L, NGX_LOG_DEBUG);
     lua_setfield(L, -2, "DEBUG");
-    /* }}} */
 }
 ```
 
