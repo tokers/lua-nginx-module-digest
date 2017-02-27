@@ -12,7 +12,8 @@
   - log_by_lua
 
 - api
-  - ngx.ctx
+  - [ngx.log](chapters/015-ngx_lua_log.md)
+  - ngx.ctx
   - ngx.sleep
   - ngx.var.VARIABLES
   - others
