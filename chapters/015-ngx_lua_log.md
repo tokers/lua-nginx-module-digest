@@ -1,6 +1,6 @@
 > 以下代码均出自 lua-nginx-module v0.10.7 版本
 
-> 这篇文章主要深入介绍 `lua-nginx-module` 的 `ngx.log` 和 `ngx.print` 这两个API 和一些相关的常量的工作过程和原理。 <br>
+> 这篇文章主要深入介绍 `lua-nginx-module` 的 `ngx.log` 和 `print` 这两个API 和一些相关的常量的工作过程和原理。 <br>
 > ngx.log 这个 API 相信大家都是十分熟悉的，它的功能就是打印错误日志，在排查一些疑难杂症的时候十分有用。
 > 
 
@@ -39,7 +39,7 @@ ngx_http_lua_inject_log_api(lua_State *L)
 
 * 注入一些 `ngx.log` 相关的常量（`ngx_http_lua_inject_log_consts`）
 * 注入函数 `ngx.log`
-* 注入函数 `ngx.print`
+* 注入函数 `print`（不是 `ngx.print`）
 
 ### ngx_http_lua_inject_log_consts
 
@@ -320,7 +320,7 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
 
 ### ngx_http_lua_print
 
-这个函数则和 `ngx.print` 相关联。
+这个函数则和 `print` 相关联。
 
 ```c
 /**
@@ -349,7 +349,7 @@ ngx_http_lua_print(lua_State *L)
 }
 ```
 
-从代码里可以看到，`ngx.print` 相当于级别为 `ngx.NOTICE` 的 `ngx.log` 调用，后续操作一致。
+从代码里可以看到，`print` 相当于级别为 `ngx.NOTICE` 的 `ngx.log` 调用，后续操作一致。
 
 ### 总结
 
