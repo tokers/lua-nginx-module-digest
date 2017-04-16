@@ -1,8 +1,15 @@
+---
+
+title: lua-nginx-module 源码分析之共享内存字典
+tag: ngx\_lua nginx
+
+---
+
 > 在 `ngx_lua` 的世界里，共享内存被组织成“共享内存字典”，也就是 `ngx.shared.DICT`，截至 0.10.8 版本，`ngx_lua` 提供了 17 个操作共享内存字典的 API，这些 API 提高了编程的灵活性，让共享内存以 Lua table 的形式展现在我们的面前，而且无需我们关心竞态问题，所有的操作都是原子性的，这大大提高了 `ngx_lua` 工程师的开发效率.  <br> <br>
 本文将会着眼于共享内存字典的内部实现，对源码进行透彻的分析. 这里认为读者在阅读此文时，已经对 `Nginx` 和 `ngx_lua` 有了一定的认识. 注意，下文将会涉及到共享内存字典相关的每个函数（暂时不包括 `ffi`），因此代码量比较大！
 > 
 
-<!-- more !-->
+<!-- more -->
 
 ### API
 
@@ -37,7 +44,7 @@ lua_shared_dict dog 1m;
 详细介绍请参考[文档](https://github.com/openresty/lua-nginx-module#toc179)
 
 
-### internel structure
+### Internel Structure
 
 直观来看，共享内存字典就是一张 Lua table，每一对 key-value 在内部都以一个 `ngx_http_lua_shdict_node_t` 的实例存在（下文称之为节点），为了提高检索效率，所有节点被组织成红黑树，同时这些节点又都在一个 LRU 队列上，这是为了快速淘汰节点而设计的. 事实上这种设计也在其他的 Nginx 模块里出现过，比如 `ngx_http_limit_req_module`.
 
@@ -1867,7 +1874,7 @@ ngx_http_lua_shdict_llen(lua_State *L)
 ```
 
 
-### auxiliary function 
+### Auxiliary Function 
 
 上面介绍的这些函数，用到了一些辅助函数，有：
 
