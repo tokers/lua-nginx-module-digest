@@ -39,7 +39,7 @@ ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
 
     co = lua_newthread(L);
 
-    /*  {{{ inherit coroutine's globals to main thread's globals table
+    /*  inherit coroutine's globals to main thread's globals table
      *  for print() function will try to find tostring() in current
      *  globals table.
      */
@@ -52,7 +52,6 @@ ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
     lua_setmetatable(co, -2);
 
     ngx_http_lua_set_globals_table(co);
-    /*  }}} */
 
     *ref = luaL_ref(L, -2);
 
@@ -95,13 +94,65 @@ server {
 2017/02/23 20:18
 ```
 
+因此 `entry thread` 的全局变量都不是真正的全局变量，防止了全局变量的滥用
+
 最后我们看到这个函数创建了一个对新协程的引用（防止垃圾回收），然后恢复父亲协程的栈，最后返回这个新协程的 `lua_State` 对象指针（或者创建引用失败就返回 `NULL`）。
 
 
 ### ngx_http_lua_run_thread
 
-运行一个 Lua 协程
+> 该函数比较长，这里不贴代码了。
+
+这个函数负责运行一个 Lua 协程。<br>
+首先讲下这个函数的准备工作，设置一个当 Lua VM 抛出异常时进行处理的回调函数，也就是
 
 ```c
+lua_atpanic(L, ngx_http_lua_atpanic)
 
+/*  longjmp mark for restoring nginx execution after Lua VM crashing */
+jmp_buf ngx_http_lua_exception;
+
+/**
+ * Override default Lua panic handler, output VM crash reason to nginx error
+ * log, and restore execution to the nearest jmp-mark.
+ *
+ * @param L Lua state pointer
+ * @retval Long jump to the nearest jmp-mark, never returns.
+ * @note nginx request pointer should be stored in Lua thread's globals table
+ * in order to make logging working.
+ * */
+int
+ngx_http_lua_atpanic(lua_State *L)
+{
+#ifdef NGX_LUA_ABORT_AT_PANIC
+    abort();
+#else
+    u_char                  *s = NULL;
+    size_t                   len = 0;
+
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        s = (u_char *) lua_tolstring(L, -1, &len);
+    }
+
+    if (s == NULL) {
+        s = (u_char *) "unknown reason";
+        len = sizeof("unknown reason") - 1;
+    }
+
+    ngx_log_stderr(0, "lua atpanic: Lua VM crashed, reason: %*s", len, s);
+    ngx_quit = 1;
+
+    /*  restore nginx execution */
+    NGX_LUA_EXCEPTION_THROW(1);
+
+    /* impossible to reach here */
+#endif
+}
 ```
+
+`ngx_http_lua_atpanic ` 这个函数会把异常信息写入到错误日志中，级别是 `error`，然后恢复抛异常的协程运行前的运行环境，这是通过 `setjmp` 和 `longjmp` 来实现的。
+
+紧接着就是利用 `lua_resume` 来运行目标协程了，需要运行的函数及其参数在调用 `ngx_http_lua_run_thread ` 前就已经压到目标协程虚拟机的栈之上了。接着需要 `lua_resume` 不同的返回码做不同的处理。
+
+1. 如果返回码是 `LUA_YIELD`，说明目标协程没有运行完，而是把自己挂起了。
+
