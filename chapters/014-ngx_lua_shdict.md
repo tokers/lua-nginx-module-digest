@@ -11,7 +11,7 @@
 ```nginx
 lua_shared_dict dog 1m;
 ```
-<br><br><br>
+<br>
 
 
 `ngx_lua` 共享内存字典一共有 17 个 API.
@@ -53,7 +53,7 @@ typedef struct {
 	u_char 		data[1]; /* 键字符串的第一个字符 */
 };
 ```
-<br><br><br>
+<br>
 
 
 > value_type 用一个枚举类型来表示，目前值类型有
@@ -67,8 +67,7 @@ enum {
 	SHDICT_TLIST = 5, /* list，这是一个特殊的双端队列类型 */
 };
 ```
-<br><br><br>
-
+<br>
 
 > 针对每个共享内存字典，ngx_lua 对其设置了上下文信息
 > 
@@ -200,8 +199,7 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 ```
 
-这个函数功能比较简单，主要工作就是解析出当前添加的共享内存的名字和大小，然后将其挂到 `ngx_lua` 模块 main 配置文件下的 `shdict_zones` 数组上. 我们知道共享内存最终是通过 `ngx_cycle_t` 的 `shared_memory` 数组维护的，而这里调用了`ngx_http_lua_shared_memory_add`，这个函数则封装了 Nginx 原生的 `ngx_http_shared_memory_add` 接口. <br><br><br>
-
+这个函数功能比较简单，主要工作就是解析出当前添加的共享内存的名字和大小，然后将其挂到 `ngx_lua` 模块 main 配置文件下的 `shdict_zones` 数组上. 我们知道共享内存最终是通过 `ngx_cycle_t` 的 `shared_memory` 数组维护的，而这里调用了`ngx_http_lua_shared_memory_add`，这个函数则封装了 Nginx 原生的 `ngx_http_shared_memory_add` 接口. <br>
 
 > ngx_http_lua_shared_memory_add 
 
@@ -256,8 +254,7 @@ ngx_http_lua_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size,
 }
 ```
 
-<br><br><br>
-
+<br>
 
 `ngx_http_lua_shared_memory_add ` 函数里我们看到了共享内存初始化的函数，即 `ngx_http_lua_shared_memory_init`，这个函数将在 `ngx_init_cycle` 里被调用.
 
@@ -297,8 +294,7 @@ ngx_http_lua_shared_memory_init(ngx_shm_zone_t *shm_zone, void *data)
 }
 ```
 
-这个函数简介调用了 `ngx_http_lua_shm_dict_init`，也就是站在共享内存字典的角度上进行初始化，所以才有了 `ngx_http_lua_shared_memory_add ` 函数里对分配出来的 zone 结构进行的复制，一个由 `ngx_cycle_t` 维护，而另外一个存在于 `ngx_http_lua_shm_zone_t`，二者的初始化方式不同.<br><br><br>
-
+这个函数简介调用了 `ngx_http_lua_shm_dict_init`，也就是站在共享内存字典的角度上进行初始化，所以才有了 `ngx_http_lua_shared_memory_add ` 函数里对分配出来的 zone 结构进行的复制，一个由 `ngx_cycle_t` 维护，而另外一个存在于 `ngx_http_lua_shm_zone_t`，二者的初始化方式不同.<br>
 
 
 > ngx_http_lua_shdict_init_zone
@@ -890,7 +886,7 @@ allocated:
 }
 ```
 
-`ngx_http_lua_shdict_set_helper` 函数是插入操作的核心，它总共考虑了 5 种不同的情况，根据不同的需求做出不同的操作. 不论是 `set` 也好，`add` 也好，亦或是 `safe_set` 等等，其操作核心思路都是一致的：在已有的红黑树上遍历，如果找到，则如何操作（可以复用则复用，无法复用则先删除）；如果没找到，需要创建新节点，创建新节点的时候如果内存不够，进行淘汰，新节点创建完成并且初始化后，插入到红黑树上，挂到 LRU 队列的首部. <br><br><br>
+`ngx_http_lua_shdict_set_helper` 函数是插入操作的核心，它总共考虑了 5 种不同的情况，根据不同的需求做出不同的操作. 不论是 `set` 也好，`add` 也好，亦或是 `safe_set` 等等，其操作核心思路都是一致的：在已有的红黑树上遍历，如果找到，则如何操作（可以复用则复用，无法复用则先删除）；如果没找到，需要创建新节点，创建新节点的时候如果内存不够，进行淘汰，新节点创建完成并且初始化后，插入到红黑树上，挂到 LRU 队列的首部. <br>
 
 > ngx.shared.DICT.get <br>
 > ngx.shared.DICT.get_stale
@@ -1024,7 +1020,7 @@ ngx_http_lua_shdict_get_helper(lua_State *L, int get_stale)
 ```
 
 
-这个函数总体来讲非常简单，只要针对是否能读取过期数据进行判断即可，具体读者可以参阅注释. <br><br><br>
+这个函数总体来讲非常简单，只要针对是否能读取过期数据进行判断即可，具体读者可以参阅注释. <br>
 
 
 > ngx.shared.DICT.inrc <br>
@@ -1438,8 +1434,7 @@ typedef struct {
 * rpush
 * llen
 
-下面对这些 API 进行分析. <br><br><br>
-
+下面对这些 API 进行分析. <br>
 
 > ngx.shared.DICT.lpop <br>
 > ngx.shared.DICT.rpop
@@ -1581,8 +1576,7 @@ ngx_http_lua_shdict_pop_helper(lua_State *L, int flags)
     return 1;
 }
 ```
-整个函数也比较简单，整体思路就是取出 list 的哨兵节点，根据是 lpop 还是 rpop 进行节点移除即可.<br><br><br>
-
+整个函数也比较简单，整体思路就是取出 list 的哨兵节点，根据是 lpop 还是 rpop 进行节点移除即可.<br>
 
 
 > lpush 和 rpush 的核心函数则是 ngx_http_lua_shdict_push_helper
@@ -1822,8 +1816,7 @@ push_node:
 }
 ```
 
-这个函数的流程也是先从目前的红黑树上找到节点，判断之前存放的是否过期，过期的时候，如果之前也是 list，则在移除所有的 list 元素后，复用节点，然后推入新元素；如果不是 list，则删除原来的节点，然后初始化 list、push 元素；如果不过期且原来不是 list，返回 `nil` 和错误串，否则直接在原来基础上 push 元素即可. <br><br><br>
-
+这个函数的流程也是先从目前的红黑树上找到节点，判断之前存放的是否过期，过期的时候，如果之前也是 list，则在移除所有的 list 元素后，复用节点，然后推入新元素；如果不是 list，则删除原来的节点，然后初始化 list、push 元素；如果不过期且原来不是 list，返回 `nil` 和错误串，否则直接在原来基础上 push 元素即可. <br>
 
 > ngx.shared.DICT.llen
 
